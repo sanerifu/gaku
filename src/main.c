@@ -1,21 +1,60 @@
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static APIENTRY void debugCallback(
+    GLenum source,
+    GLenum type,
+    unsigned int id,
+    GLenum severity,
+    GLsizei length,
+    char const* message,
+    void const* userParam
+);
+static GLuint createProgram(char const* source);
+static char const* SHADER;
 
 int main() {
     GLFWwindow* window;
+    GLuint vao;
+    GLuint program;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
     window = glfwCreateWindow(800, 600, "Gaku Test", NULL, NULL);
 
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc)&glfwGetProcAddress);
 
-    while(!glfwWindowShouldClose(window)) {
+    /* Init */
+    {
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallback(&debugCallback, NULL);
+        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_TRUE);
+
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+        glBindVertexArray(0);
+
+        program = createProgram(SHADER);
+    }
+
+    while (!glfwWindowShouldClose(window)) {
         glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        /* Render */
+        {
+            glUseProgram(program);
+            glBindVertexArray(vao);
+            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+        }
+
         glfwPollEvents();
         glfwSwapBuffers(window);
     }
@@ -23,4 +62,178 @@ int main() {
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
+}
+
+static char const* VERTEX_PRELUDE;
+static char const* FRAGMENT_PRELUDE;
+static GLuint createShader(GLenum type, char const* prelude, char const* source);
+
+static GLuint createProgram(char const* source) {
+    GLuint program = glCreateProgram();
+    GLuint vertex_shader = createShader(GL_VERTEX_SHADER, VERTEX_PRELUDE, source);
+    GLuint fragment_shader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_PRELUDE, source);
+    GLint status;
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    if (status == GL_FALSE) {
+        GLint log_length;
+        char* log;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_length);
+        log = calloc(log_length, sizeof(char));
+        glGetProgramInfoLog(program, log_length, &log_length, log);
+        fprintf(stderr, "Link error:\n%.*s\n", (int)log_length, log);
+        abort();
+    }
+
+    return program;
+}
+
+static GLuint createShader(GLenum type, char const* prelude, char const* source) {
+    GLuint shader = glCreateShader(type);
+    char const* sources[2];
+    GLint status;
+
+    sources[0] = prelude;
+    sources[1] = source;
+
+    glShaderSource(shader, 2, (GLchar const* const*)sources, NULL);
+    glCompileShader(shader);
+
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+    if (status == GL_FALSE) {
+        GLint log_length = 0;
+        char* log;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+        log = calloc(log_length, sizeof(char));
+        glGetShaderInfoLog(shader, log_length, &log_length, log);
+        fprintf(stderr, "Compile error:\n%.*s\n", (int)log_length, log);
+        abort();
+    }
+
+    return shader;
+}
+
+#define STRINGIFY(x) #x
+#define EVAL(x) STRINGIFY(x)
+#define LINE_TO_STRING EVAL(__LINE__)
+
+static const char* SHADER = "#line " LINE_TO_STRING
+                            "\n"
+                            "varying vec2 vTex;\n"
+                            "#if VERTEX\n"
+                            "void main() {\n"
+                            "vec2 uv = vec2(float((gl_VertexID & 2) >> 1), float(1 - (gl_VertexID & 1)));\n"
+                            "vTex = uv;\n"
+                            "gl_Position = vec4(2.0f * uv - 1.0f, 0.0f, 1.0f);\n"
+                            "}\n"
+                            "#endif\n"
+                            "#if FRAGMENT\n"
+                            "out vec4 oColor;\n"
+                            "void main() {\n"
+                            "oColor = vec4(vTex, 0.0f, 1.0f);\n"
+                            "}\n"
+                            "#endif\n";
+static const char* VERTEX_PRELUDE =
+    "#version 460 core\n"
+    "#line " LINE_TO_STRING
+    "\n"
+    "#define varying out\n"
+    "#define VERTEX 1\n"
+    "#define FRAGMENT 0\n";
+static const char* FRAGMENT_PRELUDE =
+    "#version 460 core\n"
+    "#line " LINE_TO_STRING
+    "\n"
+    "#define varying in\n"
+    "#define FRAGMENT 1\n"
+    "#define VERTEX 0\n";
+
+static APIENTRY void debugCallback(
+    GLenum source,
+    GLenum type,
+    unsigned int id,
+    GLenum severity,
+    GLsizei length,
+    char const* message,
+    void const* userParam
+) {
+    (void)length;
+    (void)userParam;
+    /* ignore non-significant error/warning codes */
+    if (id == 131169 || id == 131185 || id == 131218 || id == 131204)
+        return;
+
+    fprintf(stderr, "Debug message (%d): %s\n", id, message);
+
+    switch (source) {
+        case GL_DEBUG_SOURCE_API:
+            fprintf(stderr, "Source: API\n");
+            break;
+        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+            fprintf(stderr, "Source: Window System\n");
+            break;
+        case GL_DEBUG_SOURCE_SHADER_COMPILER:
+            fprintf(stderr, "Source: Shader Compiler\n");
+            break;
+        case GL_DEBUG_SOURCE_THIRD_PARTY:
+            fprintf(stderr, "Source: Third Party\n");
+            break;
+        case GL_DEBUG_SOURCE_APPLICATION:
+            fprintf(stderr, "Source: Application\n");
+            break;
+        case GL_DEBUG_SOURCE_OTHER:
+            fprintf(stderr, "Source: Other\n");
+            break;
+    }
+
+    switch (type) {
+        case GL_DEBUG_TYPE_ERROR:
+            fprintf(stderr, "Type: Error\n");
+            break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+            fprintf(stderr, "Type: Deprecated Behaviour\n");
+            break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+            fprintf(stderr, "Type: Undefined Behaviour\n");
+            break;
+        case GL_DEBUG_TYPE_PORTABILITY:
+            fprintf(stderr, "Type: Portability\n");
+            break;
+        case GL_DEBUG_TYPE_PERFORMANCE:
+            fprintf(stderr, "Type: Performance\n");
+            break;
+        case GL_DEBUG_TYPE_MARKER:
+            fprintf(stderr, "Type: Marker\n");
+            break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:
+            fprintf(stderr, "Type: Push Group\n");
+            break;
+        case GL_DEBUG_TYPE_POP_GROUP:
+            fprintf(stderr, "Type: Pop Group\n");
+            break;
+        case GL_DEBUG_TYPE_OTHER:
+            fprintf(stderr, "Type: Other\n");
+            break;
+    }
+
+    switch (severity) {
+        case GL_DEBUG_SEVERITY_HIGH:
+            fprintf(stderr, "Severity: high\n");
+            break;
+        case GL_DEBUG_SEVERITY_MEDIUM:
+            fprintf(stderr, "Severity: medium\n");
+            break;
+        case GL_DEBUG_SEVERITY_LOW:
+            fprintf(stderr, "Severity: low\n");
+            break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION:
+            fprintf(stderr, "Severity: notification\n");
+            break;
+    }
 }
