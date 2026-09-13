@@ -1,10 +1,21 @@
 add_rules("mode.debug", "mode.release")
 
+add_requires("freetype", "glad", "glfw")
+
 target("gaku")
-    set_kind("binary")
-    add_files("src/*.c")
+    set_kind("static")
+    add_files("src/gaku/*.c")
     set_languages("c89")
     set_warnings("all", "extra", "error", "pedantic")
+    add_packages("freetype")
+
+target("gaku_test")
+    set_kind("binary")
+    add_files("src/main.c")
+    set_languages("c89")
+    set_warnings("all", "extra", "error", "pedantic")
+    add_deps("gaku")
+    add_packages("glad", "glfw")
 
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
