@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "gaku/gaku.h"
+
 static APIENTRY void debugCallback(
     GLenum source,
     GLenum type,
@@ -17,11 +19,6 @@ static APIENTRY void debugCallback(
 );
 static GLuint createProgram(char const* source);
 static char const* SHADER;
-
-typedef struct InstanceData {
-    uint16_t x;
-    uint16_t y;
-} InstanceData;
 
 static uint16_t makeUshort(float v) {
     if (v < 0.0f) {
@@ -48,8 +45,18 @@ int main() {
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc)&glfwGetProcAddress);
 
-    InstanceData sample_data[] = {
-        (InstanceData){.x = makeUshort(32.0f / 800.0f), .y = makeUshort(32.0f / 600.0f)},
+    GakuData sample_data[] = {
+        (GakuData){
+            .position =
+                {
+                    .x = makeUshort(32.0f / 800.0f),
+                    .y = makeUshort(100.0f / 600.0f),
+                },
+            .size = {
+                .w = makeUshort(64.0f / 800.0f),
+                .h = makeUshort(128.0f / 600.0f),
+            },
+        },
     };
 
     /* Init */
@@ -66,15 +73,25 @@ int main() {
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
         glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
         glVertexAttribPointer(
             0,
             2,
             GL_UNSIGNED_SHORT,
             GL_TRUE,
-            sizeof(InstanceData),
-            (void const*)(offsetof(InstanceData, x))
+            sizeof(GakuData),
+            (void const*)(offsetof(GakuData, position))
+        );
+        glVertexAttribPointer(
+            1,
+            2,
+            GL_UNSIGNED_SHORT,
+            GL_TRUE,
+            sizeof(GakuData),
+            (void const*)(offsetof(GakuData, size))
         );
         glVertexAttribDivisor(0, 1);
+        glVertexAttribDivisor(1, 1);
         glBindVertexArray(0);
 
         program = createProgram(SHADER);
@@ -159,23 +176,27 @@ static GLuint createShader(GLenum type, char const* prelude, char const* source)
 #define EVAL(x) STRINGIFY(x)
 #define LINE_TO_STRING EVAL(__LINE__)
 
-static const char* SHADER = "#line " LINE_TO_STRING
-                            "\n"
-                            "varying vec2 vTex;\n"
-                            "#if VERTEX\n"
-                            "in vec2 aPosition;\n"
-                            "void main() {\n"
-                            "vec2 uv = vec2(float((gl_VertexID & 2) >> 1), float(1 - (gl_VertexID & 1)));\n"
-                            "vTex = uv;\n"
-                            "gl_Position = vec4(2.0f * (uv * aPosition) - 1.0f, 0.0f, 1.0f);\n"
-                            "}\n"
-                            "#endif\n"
-                            "#if FRAGMENT\n"
-                            "out vec4 oColor;\n"
-                            "void main() {\n"
-                            "oColor = vec4(vTex, 0.0f, 1.0f);\n"
-                            "}\n"
-                            "#endif\n";
+static const char* SHADER =
+    "#line " LINE_TO_STRING
+    "\n"
+    "varying vec2 vTex;\n"
+    "#if VERTEX\n"
+    "in vec2 aPosition;\n"
+    "in vec2 aSize;\n"
+    "void main() {\n"
+    "vec2 uv = vec2(float((gl_VertexID & 2) >> 1), float(1 - (gl_VertexID & 1)));\n"
+    "vTex = uv;\n"
+    "vec4 pos = vec4(2.0f * (uv * aSize + vec2(aPosition.x, aPosition.y)) - 1.0f, 0.0f, 1.0f);\n"
+    "pos.y = -pos.y;\n"
+    "gl_Position = pos;\n"
+    "}\n"
+    "#endif\n"
+    "#if FRAGMENT\n"
+    "out vec4 oColor;\n"
+    "void main() {\n"
+    "oColor = vec4(vTex, 0.0f, 1.0f);\n"
+    "}\n"
+    "#endif\n";
 static const char* VERTEX_PRELUDE =
     "#version 460 core\n"
     "#line " LINE_TO_STRING
