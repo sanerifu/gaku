@@ -1,5 +1,8 @@
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,10 +18,25 @@ static APIENTRY void debugCallback(
 static GLuint createProgram(char const* source);
 static char const* SHADER;
 
+typedef struct InstanceData {
+    uint16_t x;
+    uint16_t y;
+} InstanceData;
+
+static uint16_t makeUshort(float v) {
+    if (v < 0.0f) {
+        v = 0.0f;
+    } else if (v > 1.0f) {
+        v = 1.0f;
+    }
+    return (uint16_t)roundf(v * 65535.0f);
+}
+
 int main() {
     GLFWwindow* window;
     GLuint vao;
     GLuint program;
+    GLuint instance_buffer;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -30,6 +48,10 @@ int main() {
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc)&glfwGetProcAddress);
 
+    InstanceData sample_data[] = {
+        (InstanceData){.x = makeUshort(32.0f / 800.0f), .y = makeUshort(32.0f / 600.0f)},
+    };
+
     /* Init */
     {
         glEnable(GL_DEBUG_OUTPUT);
@@ -37,8 +59,22 @@ int main() {
         glDebugMessageCallback(&debugCallback, NULL);
         glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_TRUE);
 
+        glGenBuffers(1, &instance_buffer);
+        glBindBuffer(GL_ARRAY_BUFFER, instance_buffer);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(sample_data), sample_data, GL_DYNAMIC_DRAW);
+
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(
+            0,
+            2,
+            GL_UNSIGNED_SHORT,
+            GL_TRUE,
+            sizeof(InstanceData),
+            (void const*)(offsetof(InstanceData, x))
+        );
+        glVertexAttribDivisor(0, 1);
         glBindVertexArray(0);
 
         program = createProgram(SHADER);
@@ -52,7 +88,7 @@ int main() {
         {
             glUseProgram(program);
             glBindVertexArray(vao);
-            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, sizeof(sample_data) / sizeof(sample_data[0]));
         }
 
         glfwPollEvents();
@@ -127,10 +163,11 @@ static const char* SHADER = "#line " LINE_TO_STRING
                             "\n"
                             "varying vec2 vTex;\n"
                             "#if VERTEX\n"
+                            "in vec2 aPosition;\n"
                             "void main() {\n"
                             "vec2 uv = vec2(float((gl_VertexID & 2) >> 1), float(1 - (gl_VertexID & 1)));\n"
                             "vTex = uv;\n"
-                            "gl_Position = vec4(2.0f * uv - 1.0f, 0.0f, 1.0f);\n"
+                            "gl_Position = vec4(2.0f * (uv * aPosition) - 1.0f, 0.0f, 1.0f);\n"
                             "}\n"
                             "#endif\n"
                             "#if FRAGMENT\n"
